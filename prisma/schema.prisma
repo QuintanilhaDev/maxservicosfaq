@@ -17,16 +17,40 @@ model AdminUser {
   replies   Reply[]
 }
 
+// Guarda o "estado" da conversa de bot de cada número de telefone,
+// enquanto o colaborador ainda não chegou a uma dúvida completa
+// (nome -> assunto -> mensagem). Depois que a dúvida é criada, essa
+// conversa fica em AWAITING_ADMIN até o admin responder, e então
+// volta para IDLE (pronta para uma nova dúvida no futuro).
+model Conversation {
+  id               String   @id @default(cuid())
+  phone            String   @unique
+  name             String?
+  stage            String   @default("AWAITING_NAME")
+  // AWAITING_NAME | AWAITING_SUBJECT | AWAITING_MESSAGE | AWAITING_ADMIN | IDLE
+  pendingSubject   String?
+  activeQuestionId String?
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+}
+
 model Question {
-  id          String   @id @default(cuid())
-  name        String
-  phone       String
-  message     String   @db.Text
-  status      String   @default("pending") // pending | answered
-  createdAt   DateTime @default(now())
-  replies     Reply[]
+  id            String   @id @default(cuid())
+  name          String
+  phone         String
+  subject       String
+  message       String   @db.Text
+  status        String   @default("pending") // pending | answered
+  createdAt     DateTime @default(now())
+  lastInboundAt DateTime @default(now())
+  // Marca a última vez que o colaborador escreveu sobre essa dúvida —
+  // usada para saber se ainda estamos dentro da janela de 24h do
+  // WhatsApp (fora dela, uma resposta em texto livre não é entregue,
+  // é necessário um template aprovado pela Meta).
+  replies       Reply[]
 
   @@index([status])
+  @@index([subject])
   @@index([createdAt])
 }
 

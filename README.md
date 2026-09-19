@@ -1,144 +1,155 @@
-# MAX Serviços — Central de Dúvidas
+# MAX Serviços — Central de Dúvidas (atendimento pelo WhatsApp)
 
-Plataforma web para funcionários enviarem dúvidas e a equipe administrativa
-responder direto pelo WhatsApp corporativo.
+Bot de atendimento automatizado dentro do próprio WhatsApp: o colaborador
+manda uma mensagem, recebe uma saudação, informa o nome, escolhe o assunto
+em um menu e descreve a dúvida — tudo isso sem sair do WhatsApp. A dúvida
+cai em um painel interno, onde qualquer administrador pode responder; a
+resposta é enviada automaticamente de volta pelo WhatsApp.
 
-- **Formulário público** (`/`): nome completo, telefone e dúvida (textarea adaptável), com saudação automática, animações em cascata e feedback visual verde ao preencher os campos corretamente.
-- **Dashboard admin** (`/admin/dashboard`): login protegido, visual de chat (conversa à esquerda, lista de dúvidas à direita), criação de novos administradores pelo usuário master.
-- **Envio de respostas via WhatsApp** através da Twilio, para o número que o funcionário informou no formulário.
+- **Bot no WhatsApp** — todo o atendimento do colaborador acontece por lá (nenhum link, nenhum formulário externo).
+- **Dashboard admin** (`/admin/dashboard`) — ferramenta interna: fila geral de dúvidas (qualquer admin logado responde qualquer assunto), organizadas por assunto, com histórico de conversa estilo chat.
+- **Envio de respostas via WhatsApp** através da Twilio, para o número que o bot já capturou automaticamente durante a conversa.
 
-Stack: **Next.js 14 (App Router) + TypeScript + Tailwind CSS + Framer Motion + Prisma + PostgreSQL (Supabase) + Twilio**. Tudo pronto para deploy na **Vercel**.
-
----
-
-## 1. Pré-requisitos
-
-- Node.js 18 ou superior instalado na sua máquina (para rodar localmente/testar antes do deploy).
-- Uma conta no [Supabase](https://supabase.com) (banco de dados).
-- Uma conta na [Twilio](https://www.twilio.com) (envio de WhatsApp) — pode ser configurada depois, o site funciona normalmente sem ela (só o envio real ao WhatsApp fica pendente).
-- Uma conta na [Vercel](https://vercel.com) (hospedagem).
+Stack: **Next.js 14 (App Router) + TypeScript + Tailwind CSS + Framer Motion + Prisma + PostgreSQL (Supabase) + Twilio**. Pronto para deploy na **Vercel**.
 
 ---
 
-## 2. Configurando o banco de dados (Supabase)
+## 1. Como funciona o fluxo do colaborador (dentro do WhatsApp)
 
-1. Crie um novo projeto no [Supabase](https://app.supabase.com).
-2. Vá em **Project Settings → Database → Connection string**.
-3. Copie a string no modo **"Transaction" (porta 6543, com `pgbouncer=true`)** → cole em `DATABASE_URL` no seu `.env`.
-4. Copie a string no modo **"Session" (porta 5432)** → cole em `DIRECT_URL` no seu `.env`.
-   - `DIRECT_URL` é usada só para rodar as migrations; `DATABASE_URL` é a usada em produção (compatível com o ambiente serverless da Vercel).
-5. Substitua `SENHA` pela senha do seu banco (definida na criação do projeto Supabase).
+1. Colaborador manda qualquer mensagem para +55 71 8266-8840.
+2. Bot responde com saudação (Bom dia/Boa tarde/Boa noite, fuso da Bahia) e pede o nome completo.
+3. Colaborador informa o nome.
+4. Bot envia o menu numerado de assuntos:
+   ```
+   1 - Cerimônia de lacração e carregamento das urnas
+   2 - Pagamento de benefícios
+   3 - Pagamento de salários
+   4 - Pagamento de salário-família
+   5 - Ponto eletrônico
+   6 - Transporte e deslocamento
+   7 - Outros assuntos
+   ```
+5. Colaborador responde com o número da opção.
+6. Bot pede para descrever a dúvida.
+7. Colaborador escreve a dúvida.
+8. Bot confirma o recebimento automaticamente.
+9. A dúvida cai no dashboard interno, na fila geral, marcada com o assunto escolhido.
+10. Um administrador responde pelo dashboard → a resposta é enviada automaticamente pelo WhatsApp do colaborador.
+11. Se o colaborador mandar uma nova dúvida depois, o bot já pula a etapa do nome (ele já foi salvo) e vai direto para o menu de assuntos.
 
 ---
 
-## 3. Rodando localmente (recomendado antes de publicar)
+## 2. Pré-requisitos
+
+- Node.js 18+.
+- Conta no [Supabase](https://supabase.com) (banco de dados).
+- Conta na [Twilio](https://www.twilio.com) com o número +55 71 8266-8840 registrado como **WhatsApp Sender**.
+- Conta na [Vercel](https://vercel.com).
+
+---
+
+## 3. Banco de dados (Supabase)
+
+1. Crie um projeto no [Supabase](https://app.supabase.com).
+2. **Project Settings → Database → Connection string**.
+3. Modo **"Transaction" (porta 6543)** → `DATABASE_URL`. **Não esqueça** de adicionar `?pgbouncer=true&connection_limit=1` no final — sem isso o Prisma quebra com erro de "prepared statement already exists" contra o pooler do Supabase.
+4. Modo **"Session" (porta 5432)** → `DIRECT_URL`.
+5. Se a senha do banco tiver caracteres especiais (`!`, `@`, `#`, etc.), use a connection string **pronta** que o próprio Supabase mostra na tela (já vem corretamente codificada) em vez de montar a URL manualmente.
+
+---
+
+## 4. Rodando localmente
 
 ```bash
-# 1. Instale as dependências
 npm install
-
-# 2. Copie o arquivo de variáveis de ambiente e preencha os valores
-cp .env.example .env
-
-# 3. Gere as tabelas no banco Supabase a partir do schema Prisma
-npx prisma db push
-
-# 4. Crie o usuário master (MATEUS / berrythedev45!)
-npm run db:seed
-
-# 5. Rode o projeto
+cp .env.example .env      # preencha com os valores reais
+npx prisma db push        # cria as tabelas no Supabase
+npm run db:seed           # cria o usuário master (MATEUS / berrythedev45!)
 npm run dev
 ```
 
-Acesse:
-- Formulário público: `http://localhost:3000`
-- Login do painel: `http://localhost:3000/admin/login` (usuário `MATEUS`, senha `berrythedev45!`)
+Painel: `http://localhost:3000/admin/login` (usuário `MATEUS`, senha `berrythedev45!` — troque assim que possível).
 
-**Importante:** troque a senha do usuário master assim que possível — ela está em texto puro apenas no `.env` local; no banco ela já é salva com hash (bcrypt), nunca em texto puro.
+Para testar o bot localmente, você precisa expor sua máquina publicamente (ex: [ngrok](https://ngrok.com) ou [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)) e configurar essa URL temporária como webhook na Twilio (passo 5). Nesse cenário, coloque `TWILIO_VALIDATE_SIGNATURE=false` no `.env` local, já que o domínio muda a cada execução do túnel.
 
 ---
 
-## 4. WhatsApp / Twilio (leia com atenção)
+## 5. Configurando a Twilio (WhatsApp)
 
-O envio das respostas para o WhatsApp do funcionário é feito pela **Twilio API for WhatsApp**, usando o número **+55 71 8266-8840** como remetente. Isso exige uma configuração que só a MAX Serviços (dona da conta/número) pode fazer — não é algo que se resolve só com código:
+1. Crie a conta em [twilio.com](https://www.twilio.com).
+2. Em **Messaging → Senders → WhatsApp senders**, registre o número **+55 71 8266-8840** (passa por aprovação da Meta — pode levar de alguns dias a algumas semanas, isso não depende do código, é um processo da Twilio/Meta).
+3. Copie **Account SID** e **Auth Token** (painel principal) → `TWILIO_ACCOUNT_SID` e `TWILIO_AUTH_TOKEN` no `.env`.
+4. `TWILIO_WHATSAPP_FROM="whatsapp:+557182668840"`.
+5. No mesmo WhatsApp Sender, configure **"When a message comes in"**:
+   - Método: `POST`
+   - URL: `https://SEU-DOMINIO.vercel.app/api/whatsapp/webhook`
+6. **(Recomendado) Template para reabrir conversas após 24h:** crie um Content Template em **Messaging → Content Template Builder** (ex: `"Olá {{1}}, sobre sua dúvida: {{2}}"`), envie para aprovação da Meta, e coloque o SID (`HXxxxxxxxx`) em `TWILIO_CONTENT_SID`. Sem isso, se um admin demorar mais de 24h para responder uma dúvida, o envio falha e fica registrado no dashboard com um aviso — nada se perde, mas a mensagem não chega ao colaborador até esse template existir.
 
-1. Crie uma conta Twilio em [twilio.com](https://www.twilio.com).
-2. Em **Messaging → Try it out → Send a WhatsApp message**, siga o processo de registro do **WhatsApp Sender** com o número +55 71 8266-8840 (isso passa por aprovação da Meta e pode levar alguns dias).
-3. Copie **Account SID** e **Auth Token** (painel principal da Twilio) para `TWILIO_ACCOUNT_SID` e `TWILIO_AUTH_TOKEN` no `.env`.
-4. Coloque `TWILIO_WHATSAPP_FROM="whatsapp:+557182668840"`.
-5. **Ponto crítico da política do WhatsApp:** como o funcionário nunca manda mensagem pelo WhatsApp antes (ele só preenche o formulário web), toda resposta é uma mensagem **iniciada pela empresa**. A Meta exige que esse tipo de mensagem use um **Message Template pré-aprovado** (ex: "Olá {{1}}, sobre sua dúvida: {{2}}").
-   - Crie esse template em **Messaging → Content Template Builder** no painel da Twilio, envie para aprovação da Meta, e coloque o SID gerado (`HXxxxxxxxx...`) em `TWILIO_CONTENT_SID` no `.env`.
-   - **Sem isso configurado**, o sistema tenta mandar texto livre, que só funciona se o funcionário tiver mandado mensagem pelo WhatsApp para esse número nas últimas 24 horas — na prática, não funcionará para a maioria dos casos até o template ser aprovado.
-6. Enquanto isso não estiver pronto, o sistema **continua funcionando normalmente**: as dúvidas chegam, os admins respondem no dashboard, e a conversa fica registrada — só o envio ao WhatsApp ficará marcado com um aviso (⚠) até a configuração ser concluída. Nenhuma resposta é perdida.
-
----
-
-## 5. Deploy na Vercel
-
-1. Suba este projeto para um repositório no GitHub (ou GitLab/Bitbucket).
-2. Na Vercel, clique em **Add New → Project** e importe o repositório.
-3. Em **Environment Variables**, adicione todas as variáveis do seu `.env` (não suba o `.env` para o Git — ele já está no `.gitignore`):
-   - `DATABASE_URL`
-   - `DIRECT_URL`
-   - `JWT_SECRET`
-   - `TWILIO_ACCOUNT_SID`
-   - `TWILIO_AUTH_TOKEN`
-   - `TWILIO_WHATSAPP_FROM`
-   - `TWILIO_CONTENT_SID` (quando disponível)
-   - `NEXT_PUBLIC_APP_URL` (a URL final do projeto na Vercel)
-4. Clique em **Deploy**.
-5. Depois do primeiro deploy, rode o comando de seed **uma única vez** apontando para o banco de produção (pode ser da sua máquina local, usando o mesmo `DATABASE_URL`/`DIRECT_URL` de produção no `.env`):
-   ```bash
-   npm run db:seed
-   ```
-6. Pronto — acesse `https://seu-projeto.vercel.app` (formulário) e `https://seu-projeto.vercel.app/admin/login` (painel).
+**Importante sobre a janela de 24h:** diferente da versão anterior deste projeto (que usava formulário web), agora quem inicia a conversa é sempre o colaborador — então, **respondendo dentro de 24h**, tudo funciona com texto livre, sem necessidade de template aprovado. O template só entra em cena se um admin demorar mais que isso para responder.
 
 ---
 
-## 6. Segurança
+## 6. Deploy na Vercel
 
-- Senhas de administradores ficam com hash **bcrypt** (nunca em texto puro).
-- Sessão de login usa **JWT em cookie httpOnly** (não acessível via JavaScript no navegador), válido por 12h.
-- Apenas o usuário **master** (`isMaster: true`) pode criar novos administradores.
-- A rota `/admin/dashboard` é protegida por `middleware.ts` — sem sessão válida, redireciona para `/admin/login`.
-- Recomenda-se trocar a senha padrão do usuário master (`berrythedev45!`) assim que o projeto estiver no ar — para isso, delete o usuário master no banco e rode `npm run db:seed` novamente com uma senha nova em `MASTER_PASSWORD`, ou crie essa funcionalidade de troca de senha como próxima melhoria.
+1. Suba o projeto para um repositório Git.
+2. Na Vercel: **Add New → Project** → importe o repositório.
+3. Em **Environment Variables**, adicione: `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `TWILIO_CONTENT_SID` (quando disponível), `TWILIO_VALIDATE_SIGNATURE=true`, `NEXT_PUBLIC_APP_URL`.
+4. **Deploy**.
+5. Rode `npm run db:seed` uma vez apontando para o banco de produção (mesmo `DATABASE_URL`/`DIRECT_URL` de produção no seu `.env` local).
+6. Volte à Twilio e atualize a URL do webhook (passo 5.5) para `https://seu-projeto.vercel.app/api/whatsapp/webhook`.
+7. Acesse `https://seu-projeto.vercel.app/admin/login`.
 
 ---
 
-## 7. Estrutura do projeto
+## 7. Custos e prazos (fora do meu controle)
+
+- **Twilio:** cobra por mensagem/conversa enviada e recebida via WhatsApp (valor varia por país — confira a página de preços oficial da Twilio para o Brasil antes de aprovar o orçamento).
+- **Aprovação da Meta** do número como WhatsApp Sender: normalmente alguns dias úteis, às vezes mais — não é algo que se acelera via código.
+- **Supabase:** o plano gratuito deve cobrir o volume esperado de uma central de dúvidas interna; migrar de plano só seria necessário com um volume bem maior de mensagens/armazenamento.
+
+---
+
+## 8. Segurança
+
+- Toda requisição recebida em `/api/whatsapp/webhook` é validada contra a assinatura oficial da Twilio (`X-Twilio-Signature`), rejeitando qualquer chamada que não venha realmente da Twilio.
+- Senhas de administradores com hash **bcrypt**.
+- Sessão de admin em **JWT + cookie httpOnly** (12h).
+- Apenas o usuário **master** cria novos administradores.
+- `/admin/dashboard` protegido por `middleware.ts`.
+
+---
+
+## 9. Estrutura do projeto
 
 ```
 app/
-  page.tsx                     → formulário público
-  components/
-    PublicForm.tsx             → formulário com animações, saudação e validação
-    LoadingSpinner.tsx         → spinners e skeletons de carregamento
+  page.tsx                          → redireciona "/" para /admin/login (sem formulário público)
   admin/
-    login/page.tsx             → tela de login
-    dashboard/page.tsx         → valida sessão (server component)
-    dashboard/DashboardClient.tsx → UI do chat/dashboard (client component)
+    login/page.tsx                  → tela de login
+    dashboard/page.tsx              → valida sessão (server component)
+    dashboard/DashboardClient.tsx   → chat/dashboard: fila geral, filtro por assunto, aviso de janela 24h
   api/
-    questions/route.ts         → POST cria dúvida (público) / GET lista (admin)
-    questions/[id]/reply/route.ts → responde dúvida + envia WhatsApp
-    auth/login/route.ts        → login
-    auth/logout/route.ts       → logout
-    admin/users/route.ts       → lista/cria administradores (master)
+    whatsapp/webhook/route.ts       → BOT: recebe mensagens da Twilio e conduz a conversa
+    questions/route.ts              → GET lista dúvidas (admin)
+    questions/[id]/reply/route.ts   → responde dúvida + envia WhatsApp + libera conversa
+    auth/login/route.ts, auth/logout/route.ts
+    admin/users/route.ts            → lista/cria administradores (master)
 lib/
-  prisma.ts                    → client do banco
-  auth.ts                      → hash de senha, JWT, sessão
-  whatsapp.ts                  → integração Twilio
-  greeting.ts                  → saudação por horário do visitante
-prisma/schema.prisma           → modelos do banco (AdminUser, Question, Reply)
-scripts/seed.ts                → cria o usuário master MATEUS
-middleware.ts                  → protege /admin/dashboard
+  prisma.ts, auth.ts                → banco e autenticação
+  whatsapp.ts                       → integração Twilio (texto livre + template pós-24h)
+  subjects.ts                       → lista de assuntos do menu (única fonte, usada pelo bot e pelo dashboard)
+  greeting.ts                       → saudação por horário (fuso da Bahia, no bot)
+prisma/schema.prisma                → AdminUser, Conversation (estado do bot), Question, Reply
+scripts/seed.ts                     → cria o usuário master MATEUS
+middleware.ts                       → protege /admin/dashboard
 ```
 
 ---
 
-## 8. Possíveis melhorias futuras
+## 10. Possíveis melhorias futuras
 
+- Menu com lista interativa nativa do WhatsApp (botões/lista) em vez de texto numerado — visualmente melhor, mesma lógica de bastidor.
 - Tela de "trocar minha senha" para os administradores.
 - Notificação sonora/push no dashboard quando chegar uma dúvida nova.
 - Anexar imagens na dúvida ou na resposta.
-- Histórico de conversas por funcionário (mesmo telefone) reunido em um só lugar.
-- WebSocket/Server-Sent Events para atualização em tempo real (hoje é feito por polling a cada 6s, o que já funciona bem para o volume esperado).
+- Atribuir automaticamente um admin responsável por assunto (hoje é fila geral, por decisão do time).

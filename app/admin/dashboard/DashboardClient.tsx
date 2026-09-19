@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
 
+import { SUBJECTS, getSubjectLabel } from "@/lib/subjects";
+
 interface ReplyDTO {
   id: string;
   text: string;
@@ -18,9 +20,11 @@ interface QuestionDTO {
   id: string;
   name: string;
   phone: string;
+  subject: string;
   message: string;
   status: "pending" | "answered";
   createdAt: string;
+  lastInboundAt: string;
   replies: ReplyDTO[];
 }
 
@@ -49,6 +53,12 @@ function formatClock(iso: string): string {
   });
 }
 
+const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function isSessionExpired(lastInboundAt: string): boolean {
+  return Date.now() - new Date(lastInboundAt).getTime() > SESSION_WINDOW_MS;
+}
+
 export function DashboardClient({
   currentUser,
 }: {
@@ -63,6 +73,7 @@ export function DashboardClient({
   const [sendError, setSendError] = useState("");
   const [mobileShowConversation, setMobileShowConversation] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "answered">("all");
+  const [subjectFilter, setSubjectFilter] = useState<string>("all");
 
   const [showUserModal, setShowUserModal] = useState(false);
   const [admins, setAdmins] = useState<AdminUserDTO[]>([]);
@@ -106,8 +117,9 @@ export function DashboardClient({
   const selectedQuestion = questions.find((q) => q.id === selectedId) || null;
 
   const filteredQuestions = questions.filter((q) => {
-    if (filter === "all") return true;
-    return q.status === filter;
+    if (filter !== "all" && q.status !== filter) return false;
+    if (subjectFilter !== "all" && q.subject !== subjectFilter) return false;
+    return true;
   });
 
   async function handleLogout() {
@@ -259,7 +271,18 @@ export function DashboardClient({
                     {selectedQuestion.phone}
                   </p>
                 </div>
+                <span className="ml-auto hidden sm:inline text-[11px] px-2.5 py-1 rounded-full bg-jade-500/15 text-jade-300 border border-jade-700/40 shrink-0">
+                  {getSubjectLabel(selectedQuestion.subject)}
+                </span>
               </div>
+
+              {isSessionExpired(selectedQuestion.lastInboundAt) && (
+                <div className="px-4 sm:px-6 py-2 bg-amber-950/40 border-b border-amber-800/40 text-amber-300 text-xs">
+                  ⚠ A janela de 24h do WhatsApp para essa conversa expirou. Uma
+                  resposta em texto livre pode não ser entregue — configure um
+                  template aprovado (TWILIO_CONTENT_SID) para reabrir a conversa.
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-4">
                 {/* Mensagem original do funcionário */}
@@ -383,6 +406,21 @@ export function DashboardClient({
             ))}
           </div>
 
+          <div className="px-3 pb-3 border-b border-jade-900/30 shrink-0">
+            <select
+              value={subjectFilter}
+              onChange={(e) => setSubjectFilter(e.target.value)}
+              className="w-full text-xs bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-jade-400 transition-colors duration-300"
+            >
+              <option value="all">Todos os assuntos</option>
+              {SUBJECTS.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex-1 overflow-y-auto">
             {loading ? (
               <div className="p-4 space-y-4">
@@ -426,6 +464,9 @@ export function DashboardClient({
                         </span>
                       </div>
                       <p className="text-sm text-gray-500 truncate">{q.message}</p>
+                      <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-jade-900/40 text-jade-400">
+                        {getSubjectLabel(q.subject)}
+                      </span>
                     </div>
                     {q.status === "pending" ? (
                       <span className="w-2 h-2 rounded-full bg-jade-400 mt-2 shrink-0 animate-pulse-soft" />

@@ -1,9 +1,8 @@
-import { PublicForm } from "./components/PublicForm";
+import { redirect } from "next/navigation";
 
+// Não existe mais formulário público: colaboradores enviam dúvidas
+// diretamente pelo WhatsApp (o bot fica em app/api/whatsapp/webhook).
+// A raiz do site é usada apenas pela equipe administrativa.
 export default function HomePage() {
-  return (
-    <main className="min-h-screen flex items-center justify-center px-4 py-16">
-      <PublicForm />
-    </main>
-  );
+  redirect("/admin/login");
 }

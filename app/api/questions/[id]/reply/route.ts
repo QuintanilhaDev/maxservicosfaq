@@ -35,11 +35,14 @@ export async function POST(
       return NextResponse.json({ error: "Dúvida não encontrada." }, { status: 404 });
     }
 
-    // Envia a resposta pelo WhatsApp para o telefone cadastrado pelo funcionário
+    // Envia a resposta pelo WhatsApp para o telefone cadastrado pelo funcionário.
+    // sendWhatsAppReply já verifica sozinho se ainda estamos dentro da janela
+    // de 24h desde a última mensagem do colaborador (question.lastInboundAt).
     const whatsappResult = await sendWhatsAppReply({
       toPhone: question.phone,
       employeeName: question.name,
       replyText: parsed.data.text,
+      lastInboundAt: question.lastInboundAt,
     });
 
     const reply = await prisma.reply.create({
@@ -57,6 +60,17 @@ export async function POST(
       where: { id: question.id },
       data: { status: "answered" },
     });
+
+    // Libera a conversa desse telefone para um novo ciclo (o colaborador
+    // pode mandar uma nova dúvida a qualquer momento a partir de agora).
+    if (whatsappResult.success) {
+      await prisma.conversation
+        .update({
+          where: { phone: question.phone },
+          data: { stage: "IDLE", activeQuestionId: null },
+        })
+        .catch(() => null); // não quebra a resposta se a conversa não existir mais
+    }
 
     return NextResponse.json({
       reply,
