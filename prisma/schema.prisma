@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model AdminUser {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  isMaster  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  replies   Reply[]
+}
+
+model Question {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String
+  message     String   @db.Text
+  status      String   @default("pending") // pending | answered
+  createdAt   DateTime @default(now())
+  replies     Reply[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Reply {
+  id             String    @id @default(cuid())
+  question       Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId     String
+  text           String    @db.Text
+  adminUser      AdminUser @relation(fields: [adminUserId], references: [id])
+  adminUserId    String
+  sentToWhatsApp Boolean   @default(false)
+  whatsappError  String?
+  createdAt      DateTime  @default(now())
+
+  @@index([questionId])
+}
