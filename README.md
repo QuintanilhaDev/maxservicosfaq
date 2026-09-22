@@ -75,6 +75,25 @@ Se o colaborador escrever de novo depois de uma resposta automática (sinal de q
 
 ## 4. Página de Métricas
 
+## 4.1 Atualizações em tempo real
+
+O dashboard e a página de Métricas se atualizam sozinhos, na hora, quando:
+- Chega uma dúvida nova.
+- A IA responde uma dúvida automaticamente.
+- Um admin responde uma dúvida.
+
+Isso usa o **Supabase Realtime** (canal de "Broadcast") — grátis, já incluído no mesmo projeto do banco de dados, sem serviço novo pra contratar. O aviso em si não carrega nenhum dado sensível (nenhuma dúvida, nome ou telefone passa por ele); ele só avisa "algo mudou, atualize", e os dados de verdade continuam vindo pela rota autenticada de sempre.
+
+Configure em `.env`:
+```
+NEXT_PUBLIC_SUPABASE_URL="https://SEU-PROJETO.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="sua-chave-anon-publica"
+```
+Ambas ficam em **Project Settings → API** no Supabase (a "anon public" key é segura para expor no navegador — é assim que ela foi feita para ser usada). Não precisa habilitar nada mais no Supabase (esse canal não depende de replicação de tabela).
+
+Se essas variáveis não estiverem configuradas, o sistema continua funcionando normalmente — só cai de volta no polling automático a cada 20 segundos (visível como "Modo intermitente" no canto do painel, em vez de "🟢 Ao vivo").
+
+
 Em `/admin/metrics`:
 - KPIs: dúvidas recebidas, respondidas por humano, respondidas por IA, pendentes, taxa de resposta, tempo médio de resposta.
 - Gráfico de área empilhada, animado, trocando suavemente entre os períodos **Dia anterior / Semanal / Mensal**.
@@ -185,8 +204,9 @@ lib/
   similarity.ts                       → motor TF-IDF + cosseno (a "IA")
   ai-matcher.ts                       → decide se e como a IA responde
   ai-settings.ts                      → interruptores (Setting key/value no banco)
+  realtime.ts                         → aviso instantâneo via Supabase Broadcast
   greeting.ts
-prisma/schema.prisma                  → AdminUser, Conversation, Question, Reply, Setting
+prisma/schema.prisma                  → AdminUser, Conversation, Question, Reply, Setting, ProcessedMessage
 scripts/
   seed.ts                             → cria o usuário master
   create-whatsapp-menu.ts             → cria a lista interativa na Twilio (rodar 1x)
@@ -201,3 +221,17 @@ middleware.ts
 - Exportar as métricas em CSV/PDF.
 - Atribuir automaticamente um admin responsável por assunto (hoje é fila geral).
 - Ajustar o limiar de confiança e o mínimo de exemplos diretamente pela tela (hoje têm valores padrão sensatos, ajustáveis só editando a tabela `Setting` diretamente).
+
+---
+
+## 14. Bugs corrigidos nas últimas rodadas de teste
+
+- Gráfico de métricas: datas sem zero à esquerda quebravam silenciosamente o período "Dia anterior".
+- Meia-noite podia sumir do gráfico ou virar hora inválida, por uma peculiaridade de formatação do navegador/servidor.
+- Colaborador mandando foto/áudio sem legenda escolhia o assunto errado (o primeiro da lista) sem querer.
+- Ordem de mensagens do bot trocada (saudação chegando depois do menu).
+- Usuário-sistema da IA aparecia misturado na lista de administradores do painel.
+- Chat "puxava" a rolagem pra baixo a cada atualização automática, mesmo com o admin lendo mensagens antigas.
+- Sem proteção contra a Twilio reenviar a mesma mensagem (podia duplicar uma dúvida).
+- Dúvida virava "respondida" mesmo quando o envio ao WhatsApp falhava de verdade (tanto no caminho do admin quanto no caminho da IA) — corrigido para só marcar como respondida quando a entrega é confirmada.
+- Estatística "respondidas" no painel nunca contava certo, porque o campo que marca quem respondeu (`resolvedBy`) não estava sendo preenchido no caminho do admin.

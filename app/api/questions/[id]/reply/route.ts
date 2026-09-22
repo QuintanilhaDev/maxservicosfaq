@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionFromCookies } from "@/lib/auth";
 import { sendWhatsAppReply } from "@/lib/whatsapp";
+import { broadcastDashboardEvent } from "@/lib/realtime";
 
 const replySchema = z.object({
   text: z.string().trim().min(1, "A resposta não pode ficar vazia.").max(4000),
@@ -58,7 +59,9 @@ export async function POST(
 
     await prisma.question.update({
       where: { id: question.id },
-      data: { status: "answered" },
+      data: whatsappResult.success
+        ? { status: "answered", resolvedBy: "admin" }
+        : {}, // envio falhou: mantém como pendente, para não sumir da fila
     });
 
     // Libera a conversa desse telefone para um novo ciclo (o colaborador
@@ -70,6 +73,8 @@ export async function POST(
           data: { stage: "IDLE", activeQuestionId: null },
         })
         .catch(() => null); // não quebra a resposta se a conversa não existir mais
+
+      await broadcastDashboardEvent({ type: "question_answered_admin", subject: question.subject });
     }
 
     return NextResponse.json({

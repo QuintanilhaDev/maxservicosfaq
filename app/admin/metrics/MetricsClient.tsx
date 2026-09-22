@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { getGreetingBahia } from "@/lib/greeting";
+import { getRealtimeClient, DASHBOARD_CHANNEL } from "@/lib/realtime";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
 
 type Period = "day" | "week" | "month";
@@ -137,6 +138,24 @@ export function MetricsClient({
   useEffect(() => {
     fetchAiSettings();
   }, [fetchAiSettings]);
+
+  // Reatualiza as métricas na hora quando uma dúvida é criada/respondida,
+  // sem precisar dar refresh na página (mesmo aviso usado no dashboard).
+  useEffect(() => {
+    const client = getRealtimeClient();
+    if (!client) return;
+
+    const channel = client.channel(DASHBOARD_CHANNEL);
+    channel.on("broadcast", { event: "update" }, () => {
+      fetchMetrics(period);
+    });
+    channel.subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   async function updateAiSetting(payload: object, key: string) {
     setSavingKey(key);

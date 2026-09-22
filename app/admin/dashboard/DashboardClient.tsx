@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
 import { getGreetingBahia } from "@/lib/greeting";
+import { getRealtimeClient, DASHBOARD_CHANNEL, DashboardEvent } from "@/lib/realtime";
 
 import { SUBJECTS, getSubjectLabel } from "@/lib/subjects";
 
@@ -97,6 +98,9 @@ export function DashboardClient({
   const [userError, setUserError] = useState("");
   const [userSuccess, setUserSuccess] = useState("");
 
+  const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
+  const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "offline">("connecting");
+
   const conversationEndRef = useRef<HTMLDivElement>(null);
 
   const fetchQuestions = useCallback(async (isInitial = false) => {
@@ -128,9 +132,56 @@ export function DashboardClient({
 
   useEffect(() => {
     fetchQuestions(true);
-    const interval = setInterval(() => fetchQuestions(false), 6000);
+    // Com o tempo real ativo, o polling vira só uma rede de segurança —
+    // por isso o intervalo passou de 6s para 20s.
+    const interval = setInterval(() => fetchQuestions(false), 20000);
     return () => clearInterval(interval);
   }, [fetchQuestions]);
+
+  function pushToast(text: string) {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, text }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }
+
+  useEffect(() => {
+    const client = getRealtimeClient();
+    if (!client) {
+      // Sem NEXT_PUBLIC_SUPABASE_URL/ANON_KEY configurados -> segue só no
+      // polling de 20s, sem quebrar nada.
+      setLiveStatus("offline");
+      return;
+    }
+
+    const channel = client.channel(DASHBOARD_CHANNEL);
+
+    channel
+      .on("broadcast", { event: "update" }, (message) => {
+        const payload = message.payload as DashboardEvent;
+        fetchQuestions(false);
+
+        if (payload?.type === "question_created") {
+          pushToast(`🆕 Nova dúvida recebida (${getSubjectLabel(payload.subject)})`);
+        } else if (payload?.type === "question_answered_ai") {
+          pushToast(`🤖 A IA respondeu uma dúvida (${getSubjectLabel(payload.subject)})`);
+        } else if (payload?.type === "question_answered_admin") {
+          pushToast(`✅ Uma dúvida foi respondida (${getSubjectLabel(payload.subject)})`);
+        }
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") setLiveStatus("live");
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setLiveStatus("offline");
+        }
+      });
+
+    return () => {
+      client.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const current = questions.find((q) => q.id === selectedId) || null;
@@ -241,6 +292,23 @@ export function DashboardClient({
 
   return (
     <div className="h-screen flex flex-col bg-max-black">
+      {/* Toasts de eventos em tempo real */}
+      <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 40, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 40, scale: 0.95 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="card-panel px-4 py-2.5 text-sm text-gray-100 shadow-jade-glow max-w-xs"
+            >
+              {t.text}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
       {/* Header */}
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-jade-900/40 bg-max-black-soft/60 backdrop-blur-sm shrink-0">
         <div className="flex items-center gap-2">
@@ -250,6 +318,25 @@ export function DashboardClient({
           </h1>
           <span className="hidden sm:inline text-gray-500 text-sm">
             · Painel de dúvidas
+          </span>
+          <span
+            className={`hidden md:inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full border ${
+              liveStatus === "live"
+                ? "border-jade-700/50 text-jade-300 bg-jade-500/10"
+                : "border-gray-700/50 text-gray-500 bg-gray-800/20"
+            }`}
+            title={
+              liveStatus === "live"
+                ? "Atualizações em tempo real ativas"
+                : "Sem tempo real — atualizando a cada 20s"
+            }
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                liveStatus === "live" ? "bg-jade-400 animate-pulse-soft" : "bg-gray-600"
+              }`}
+            />
+            {liveStatus === "live" ? "Ao vivo" : "Modo intermitente"}
           </span>
         </div>
 

@@ -5,6 +5,7 @@ import { sendFreeformWhatsApp, sendSubjectMenu, normalizeBrazilPhone } from "@/l
 import { matchSubjectFromReply, getSubjectLabel } from "@/lib/subjects";
 import { getGreetingBahia } from "@/lib/greeting";
 import { tryAutoAnswer, getOrCreateAiUserId } from "@/lib/ai-matcher";
+import { broadcastDashboardEvent } from "@/lib/realtime";
 
 /**
  * ENDPOINT: POST /api/whatsapp/webhook
@@ -158,12 +159,19 @@ async function handleIncomingMessage(
         data: { name, phone, subject: subjectKey, message: body },
       });
 
+      await broadcastDashboardEvent({ type: "question_created", subject: subjectKey });
+
       // Tenta responder automaticamente com base em dúvidas parecidas já
       // respondidas por humanos (veja lib/ai-matcher.ts).
       const autoAnswer = await tryAutoAnswer({ subjectKey, message: body });
 
       if (autoAnswer.answered && autoAnswer.text) {
         const aiUserId = await getOrCreateAiUserId();
+        const fullText = `${autoAnswer.text}\n\n_(resposta automática baseada em dúvidas parecidas já respondidas — se isso não resolveu, é só escrever de novo que um atendente humano assume)_`;
+
+        // Tenta enviar ANTES de gravar o resultado — nunca registrar
+        // "enviado" sem ter certeza de que foi enviado de verdade.
+        const sendResult = await sendFreeformWhatsApp({ toPhone: phone, body: fullText });
 
         await prisma.reply.create({
           data: {
@@ -172,25 +180,32 @@ async function handleIncomingMessage(
             adminUserId: aiUserId,
             isAiGenerated: true,
             matchedScore: autoAnswer.score,
-            sentToWhatsApp: true,
+            sentToWhatsApp: sendResult.success,
+            whatsappError: sendResult.success ? null : sendResult.error,
           },
         });
 
-        await prisma.question.update({
-          where: { id: question.id },
-          data: { status: "answered", resolvedBy: "ai" },
-        });
+        if (sendResult.success) {
+          await prisma.question.update({
+            where: { id: question.id },
+            data: { status: "answered", resolvedBy: "ai" },
+          });
 
-        await prisma.conversation.update({
-          where: { phone },
-          data: { stage: "AWAITING_FEEDBACK", activeQuestionId: question.id },
-        });
+          await prisma.conversation.update({
+            where: { phone },
+            data: { stage: "AWAITING_FEEDBACK", activeQuestionId: question.id },
+          });
 
-        await reply(
-          phone,
-          `${autoAnswer.text}\n\n_(resposta automática baseada em dúvidas parecidas já respondidas — se isso não resolveu, é só escrever de novo que um atendente humano assume)_`
+          await broadcastDashboardEvent({ type: "question_answered_ai", subject: subjectKey });
+          return;
+        }
+
+        // Envio da IA falhou: a dúvida segue pendente e cai no fluxo normal
+        // de encaminhamento para um humano, logo abaixo.
+        console.error(
+          `[whatsapp/webhook] Falha ao enviar resposta automática da IA para ${phone}:`,
+          sendResult.error
         );
-        return;
       }
 
       await prisma.conversation.update({
