@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
 import { getGreetingBahia } from "@/lib/greeting";
+import { speakLoginGreetingOnce } from "@/lib/voice-greeting";
 import { getRealtimeClient, DASHBOARD_CHANNEL, DashboardEvent } from "@/lib/realtime";
 
 import { SUBJECTS, getSubjectLabel } from "@/lib/subjects";
@@ -125,6 +126,11 @@ export function DashboardClient({
   useEffect(() => {
     const interval = setInterval(() => setGreeting(getGreetingBahia()), 60_000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    speakLoginGreetingOnce(toDisplayName(currentUser.username));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const prevSelectedIdRef = useRef<string | null>(null);
