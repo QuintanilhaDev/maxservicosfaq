@@ -27,7 +27,7 @@ export function getGreetingBahia(): string {
   const hourStr = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Bahia",
     hour: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   }).format(new Date());
 
   const hour = parseInt(hourStr, 10);

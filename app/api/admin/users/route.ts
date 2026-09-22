@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionFromCookies, hashPassword } from "@/lib/auth";
+import { AI_SYSTEM_USERNAME } from "@/lib/ai-matcher";
 
 const createUserSchema = z.object({
   username: z
@@ -13,7 +14,8 @@ const createUserSchema = z.object({
   password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres."),
 });
 
-// GET -> lista administradores (qualquer admin logado pode ver a lista)
+// GET -> lista administradores HUMANOS (o usuário-sistema da IA fica de fora
+// dessa lista de propósito, já que não é um admin de verdade).
 export async function GET() {
   const session = await getSessionFromCookies();
   if (!session) {
@@ -21,6 +23,7 @@ export async function GET() {
   }
 
   const users = await prisma.adminUser.findMany({
+    where: { username: { not: AI_SYSTEM_USERNAME } },
     orderBy: { createdAt: "asc" },
     select: { id: true, username: true, isMaster: true, createdAt: true },
   });

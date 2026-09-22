@@ -11,6 +11,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { getGreetingBahia } from "@/lib/greeting";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
 
 type Period = "day" | "week" | "month";
@@ -168,7 +169,9 @@ export function MetricsClient({
           </h1>
           <span className="hidden sm:inline text-gray-500 text-sm">· Métricas</span>
         </div>
-        <span className="text-sm text-gray-400">{currentUser.username}</span>
+        <span className="text-sm text-gray-400">
+          {getGreetingBahia()}, {currentUser.username}
+        </span>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">

@@ -8,7 +8,7 @@ import {
   getMinExamples,
 } from "./ai-settings";
 
-const AI_SYSTEM_USERNAME = "assistente-ia";
+export const AI_SYSTEM_USERNAME = "assistente-ia";
 
 /**
  * O modelo Reply exige um adminUserId (autor humano). Para registrar as

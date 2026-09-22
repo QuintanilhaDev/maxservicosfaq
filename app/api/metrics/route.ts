@@ -24,9 +24,10 @@ function bahiaHour(date: Date): number {
   const str = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Bahia",
     hour: "2-digit",
-    hour12: false,
+    hourCycle: "h23", // garante 00–23 (hour12:false pode virar "24" em vez de "00" em algumas versões de ICU)
   }).format(date);
-  return parseInt(str, 10);
+  const hour = parseInt(str, 10);
+  return Math.min(Math.max(hour, 0), 23); // blindagem extra, nunca sai de 0–23
 }
 
 function weekdayLabel(dateKey: string): string {
@@ -45,7 +46,12 @@ function shortDateLabel(dateKey: string): string {
 function addDaysToKey(baseKey: string, offset: number): string {
   const [y, m, d] = baseKey.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d + offset, 12));
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" }).format(date);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 interface Bucket {

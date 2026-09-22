@@ -193,17 +193,16 @@ export async function sendSubjectMenu(params: {
 
   if (menuContentSid) {
     try {
+      // Manda a saudação/prefixo primeiro (se houver), depois a lista —
+      // ordem natural de leitura para o colaborador.
+      if (params.prefixText) {
+        await client.messages.create({ from, to, body: params.prefixText });
+      }
       const message = await client.messages.create({
         from,
         to,
         contentSid: menuContentSid,
       });
-      // A lista interativa já vem com o texto de introdução embutido no
-      // template. Se houver um prefixo (ex: saudação com o nome), manda
-      // como mensagem de texto separada logo antes.
-      if (params.prefixText) {
-        await client.messages.create({ from, to, body: params.prefixText });
-      }
       return { success: true, sid: message.sid };
     } catch (err: any) {
       console.error("[whatsapp] Falha ao enviar lista interativa, usando fallback em texto:", err?.message);

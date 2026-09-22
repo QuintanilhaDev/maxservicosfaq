@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
 
   const from = params.From || ""; // "whatsapp:+5571999999999"
   const body = (params.Body || "").trim();
+  const messageSid = params.MessageSid || null;
   // Quando o colaborador toca em um item da lista interativa, a Twilio manda
   // o "id" que definimos (a subject.key) em ButtonPayload — bem mais
   // confiável do que tentar interpretar o texto do botão.
@@ -55,6 +56,17 @@ export async function POST(req: NextRequest) {
 
   if (!from) {
     return XML_EMPTY_RESPONSE;
+  }
+
+  // Proteção contra reenvio: se a Twilio já mandou esse mesmo MessageSid
+  // antes, ignora silenciosamente (não processa de novo).
+  if (messageSid) {
+    try {
+      await prisma.processedMessage.create({ data: { sid: messageSid } });
+    } catch {
+      // Já existe -> mensagem duplicada, não processa de novo.
+      return XML_EMPTY_RESPONSE;
+    }
   }
 
   const phone = normalizeBrazilPhone(from.replace("whatsapp:", ""));
