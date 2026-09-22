@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background-color: #080a09;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(0, 168, 107, 0.14), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(0, 168, 107, 0.10), transparent 50%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(0, 168, 107, 0.35);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0f1512;
+}
+::-webkit-scrollbar-thumb {
+  background: #075139;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00875a;
+}
+
+/* Input base usado no formulário público e no login */
+.field-input {
+  @apply w-full bg-max-black-soft/60 border border-jade-800/60 rounded-xl px-4 py-3
+    text-gray-100 placeholder-gray-500 outline-none transition-all duration-300
+    focus:border-jade-400 focus:bg-max-black-soft;
+}
+
+.field-input.field-valid {
+  animation: flash-border 0.6s ease-out;
+  border-color: theme("colors.jade.400");
+}
+
+.btn-primary {
+  @apply relative inline-flex items-center justify-center gap-2 rounded-xl
+    bg-gradient-to-r from-jade-600 to-jade-500 px-6 py-3 font-semibold text-white
+    shadow-jade-glow transition-all duration-300 hover:from-jade-500 hover:to-jade-400
+    hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+}
+
+.card-panel {
+  @apply bg-max-black-card/80 border border-jade-900/50 rounded-2xl shadow-card backdrop-blur-sm;
+}

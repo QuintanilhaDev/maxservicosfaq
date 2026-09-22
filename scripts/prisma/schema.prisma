@@ -71,3 +71,11 @@ model Setting {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+// Evita processar a mesma mensagem do WhatsApp duas vezes — a Twilio pode
+// reenviar o mesmo webhook se a resposta demorar (comportamento normal
+// dela), e sem isso uma dúvida poderia ser criada em duplicidade.
+model ProcessedMessage {
+  sid       String   @id
+  createdAt DateTime @default(now())
+}

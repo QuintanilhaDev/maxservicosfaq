@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { LoadingSpinner, SkeletonLine } from "@/app/components/LoadingSpinner";
+import { getGreetingBahia } from "@/lib/greeting";
 
 import { SUBJECTS, getSubjectLabel } from "@/lib/subjects";
 
@@ -56,6 +57,15 @@ function formatClock(iso: string): string {
   });
 }
 
+function toDisplayName(username: string): string {
+  return username
+    .toLowerCase()
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function isSessionExpired(lastInboundAt: string): boolean {
@@ -68,6 +78,7 @@ export function DashboardClient({
   currentUser: { username: string; isMaster: boolean };
 }) {
   const router = useRouter();
+  const [greeting, setGreeting] = useState(getGreetingBahia());
   const [questions, setQuestions] = useState<QuestionDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -108,13 +119,36 @@ export function DashboardClient({
   }, [router]);
 
   useEffect(() => {
+    const interval = setInterval(() => setGreeting(getGreetingBahia()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const prevSelectedIdRef = useRef<string | null>(null);
+  const prevReplyCountRef = useRef<number>(0);
+
+  useEffect(() => {
     fetchQuestions(true);
     const interval = setInterval(() => fetchQuestions(false), 6000);
     return () => clearInterval(interval);
   }, [fetchQuestions]);
 
   useEffect(() => {
-    conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const current = questions.find((q) => q.id === selectedId) || null;
+    const replyCount = current?.replies.length ?? 0;
+
+    // Só rola para o fim quando: trocou de conversa, ou chegou mensagem nova
+    // de verdade (mais respostas do que da última vez). Sem isso, o chat
+    // "puxava" a rolagem para baixo a cada 6s (polling), mesmo com o admin
+    // lendo mensagens antigas no meio da conversa.
+    const conversationChanged = prevSelectedIdRef.current !== selectedId;
+    const hasNewReply = !conversationChanged && replyCount > prevReplyCountRef.current;
+
+    if (selectedId && (conversationChanged || hasNewReply)) {
+      conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    prevSelectedIdRef.current = selectedId;
+    prevReplyCountRef.current = replyCount;
   }, [selectedId, questions]);
 
   const selectedQuestion = questions.find((q) => q.id === selectedId) || null;
@@ -250,6 +284,48 @@ export function DashboardClient({
           </button>
         </div>
       </header>
+
+      {/* Faixa de boas-vindas */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        className="relative overflow-hidden px-4 sm:px-6 py-4 border-b border-jade-900/30 bg-jade-radial shrink-0"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-full bg-jade-500/15 border border-jade-700/40 flex items-center justify-center text-jade-300 font-bold text-lg shrink-0">
+              {toDisplayName(currentUser.username).charAt(0)}
+            </div>
+            <div>
+              <p className="text-lg sm:text-xl font-bold text-white">
+                {greeting}, {toDisplayName(currentUser.username)}
+                <span className="ml-1">👋</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                {loading
+                  ? "Carregando o painel..."
+                  : `${questions.length} dúvida${questions.length === 1 ? "" : "s"} no total`}
+              </p>
+            </div>
+          </div>
+
+          {!loading && (
+            <div className="flex gap-2">
+              <div className="px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-700/30 text-amber-300 text-xs font-medium">
+                {questions.filter((q) => q.status === "pending").length} pendentes
+              </div>
+              <div className="px-3 py-1.5 rounded-full bg-jade-500/10 border border-jade-700/30 text-jade-300 text-xs font-medium">
+                {questions.filter((q) => q.status === "answered" && q.resolvedBy === "admin").length}{" "}
+                respondidas
+              </div>
+              <div className="px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-700/30 text-sky-300 text-xs font-medium">
+                🤖 {questions.filter((q) => q.resolvedBy === "ai").length} pela IA
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
 
       {/* Corpo: conversa à esquerda, lista à direita */}
       <div className="flex-1 flex overflow-hidden">

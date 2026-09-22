@@ -87,6 +87,7 @@ export function buildSubjectMenuText(): string {
  */
 export function matchSubjectFromReply(text: string): Subject | null {
   const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
 
   const byKey = SUBJECTS.find((s) => s.key === trimmed);
   if (byKey) return byKey;
