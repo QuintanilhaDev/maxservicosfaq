@@ -21,6 +21,12 @@ interface ReplyDTO {
   adminUser: { username: string };
 }
 
+interface AttachmentDTO {
+  id: string;
+  contentType: string;
+  createdAt: string;
+}
+
 interface QuestionDTO {
   id: string;
   name: string;
@@ -29,9 +35,11 @@ interface QuestionDTO {
   message: string;
   status: "pending" | "answered";
   resolvedBy: "admin" | "ai" | null;
+  satisfaction: "positive" | "negative" | null;
   createdAt: string;
   lastInboundAt: string;
   replies: ReplyDTO[];
+  attachments: AttachmentDTO[];
 }
 
 interface AdminUserDTO {
@@ -57,6 +65,14 @@ function formatClock(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function normalizeText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
 function toDisplayName(username: string): string {
@@ -90,6 +106,15 @@ export function DashboardClient({
   const [mobileShowConversation, setMobileShowConversation] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "answered">("all");
   const [subjectFilter, setSubjectFilter] = useState<string>("all");
+  const [searchText, setSearchText] = useState("");
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [resolvedByFilter, setResolvedByFilter] = useState<"all" | "admin" | "ai">("all");
+  const [satisfactionFilter, setSatisfactionFilter] = useState<"all" | "positive" | "negative" | "none">(
+    "all"
+  );
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [onlyWithAttachment, setOnlyWithAttachment] = useState(false);
 
   const [showUserModal, setShowUserModal] = useState(false);
   const [admins, setAdmins] = useState<AdminUserDTO[]>([]);
@@ -174,6 +199,8 @@ export function DashboardClient({
           pushToast(`🤖 A IA respondeu uma dúvida (${getSubjectLabel(payload.subject)})`);
         } else if (payload?.type === "question_answered_admin") {
           pushToast(`✅ Uma dúvida foi respondida (${getSubjectLabel(payload.subject)})`);
+        } else if (payload?.type === "question_reopened") {
+          pushToast(`↩️ Colaborador avaliou como não resolvida (${getSubjectLabel(payload.subject)})`);
         }
       })
       .subscribe((status) => {
@@ -210,9 +237,35 @@ export function DashboardClient({
 
   const selectedQuestion = questions.find((q) => q.id === selectedId) || null;
 
+  const normalizedSearch = normalizeText(searchText);
+
   const filteredQuestions = questions.filter((q) => {
     if (filter !== "all" && q.status !== filter) return false;
     if (subjectFilter !== "all" && q.subject !== subjectFilter) return false;
+
+    if (normalizedSearch) {
+      const haystack = normalizeText(`${q.name} ${q.phone} ${q.message}`);
+      if (!haystack.includes(normalizedSearch)) return false;
+    }
+
+    if (resolvedByFilter !== "all" && q.resolvedBy !== resolvedByFilter) return false;
+
+    if (satisfactionFilter !== "all") {
+      if (satisfactionFilter === "none" && q.satisfaction !== null) return false;
+      if (satisfactionFilter !== "none" && q.satisfaction !== satisfactionFilter) return false;
+    }
+
+    if (onlyWithAttachment && q.attachments.length === 0) return false;
+
+    if (dateFrom) {
+      const from = new Date(dateFrom + "T00:00:00");
+      if (new Date(q.createdAt) < from) return false;
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59");
+      if (new Date(q.createdAt) > to) return false;
+    }
+
     return true;
   });
 
@@ -452,6 +505,16 @@ export function DashboardClient({
                 <span className="ml-auto hidden sm:inline text-[11px] px-2.5 py-1 rounded-full bg-jade-500/15 text-jade-300 border border-jade-700/40 shrink-0">
                   {getSubjectLabel(selectedQuestion.subject)}
                 </span>
+                {selectedQuestion.satisfaction === "positive" && (
+                  <span className="text-lg shrink-0" title="Colaborador avaliou como resolvida">
+                    👍
+                  </span>
+                )}
+                {selectedQuestion.satisfaction === "negative" && (
+                  <span className="text-lg shrink-0" title="Colaborador avaliou como não resolvida">
+                    👎
+                  </span>
+                )}
               </div>
 
               {isSessionExpired(selectedQuestion.lastInboundAt) && (
@@ -473,6 +536,38 @@ export function DashboardClient({
                     <p className="text-gray-100 whitespace-pre-wrap break-words">
                       {selectedQuestion.message}
                     </p>
+                    {selectedQuestion.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {selectedQuestion.attachments.map((att) =>
+                          att.contentType.startsWith("image/") ? (
+                            <a
+                              key={att.id}
+                              href={`/api/attachments/${att.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block w-24 h-24 rounded-lg overflow-hidden border border-jade-900/40 hover:border-jade-500/60 transition-colors duration-300"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={`/api/attachments/${att.id}`}
+                                alt="Anexo enviado pelo colaborador"
+                                className="w-full h-full object-cover"
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              key={att.id}
+                              href={`/api/attachments/${att.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-max-black-soft/60 border border-jade-900/40 hover:border-jade-500/60 transition-colors duration-300 text-xs text-gray-300"
+                            >
+                              📎 {att.contentType.split("/")[1]?.toUpperCase() || "Arquivo"}
+                            </a>
+                          )
+                        )}
+                      </div>
+                    )}
                     <p className="text-[11px] text-gray-500 mt-1.5">
                       {formatClock(selectedQuestion.createdAt)}
                     </p>
@@ -589,6 +684,16 @@ export function DashboardClient({
             mobileShowConversation ? "hidden md:flex" : "flex"
           }`}
         >
+          <div className="p-3 border-b border-jade-900/30 shrink-0">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Buscar por nome, telefone ou palavra-chave..."
+              className="w-full text-sm bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 outline-none focus:border-jade-400 transition-colors duration-300"
+            />
+          </div>
+
           <div className="p-3 border-b border-jade-900/30 flex gap-2 shrink-0">
             {(["all", "pending", "answered"] as const).map((f) => (
               <button
@@ -618,6 +723,109 @@ export function DashboardClient({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="border-b border-jade-900/30 shrink-0">
+            <button
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors duration-300"
+            >
+              <span>Mais filtros</span>
+              <span className={`transition-transform duration-300 ${showAdvancedFilters ? "rotate-180" : ""}`}>
+                ▾
+              </span>
+            </button>
+
+            <AnimatePresence initial={false}>
+              {showAdvancedFilters && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-3 pb-3 space-y-2">
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">Respondida por</label>
+                      <select
+                        value={resolvedByFilter}
+                        onChange={(e) => setResolvedByFilter(e.target.value as any)}
+                        className="w-full text-xs bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-2 py-1.5 text-gray-300 outline-none focus:border-jade-400"
+                      >
+                        <option value="all">Todos</option>
+                        <option value="admin">Humano</option>
+                        <option value="ai">IA</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] text-gray-600 mb-1">Avaliação do colaborador</label>
+                      <select
+                        value={satisfactionFilter}
+                        onChange={(e) => setSatisfactionFilter(e.target.value as any)}
+                        className="w-full text-xs bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-2 py-1.5 text-gray-300 outline-none focus:border-jade-400"
+                      >
+                        <option value="all">Todas</option>
+                        <option value="positive">👍 Só positivas</option>
+                        <option value="negative">👎 Só negativas</option>
+                        <option value="none">Sem avaliação</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-600 mb-1">De</label>
+                        <input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="w-full text-xs bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-2 py-1.5 text-gray-300 outline-none focus:border-jade-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-600 mb-1">Até</label>
+                        <input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="w-full text-xs bg-max-black-soft/60 border border-jade-800/50 rounded-lg px-2 py-1.5 text-gray-300 outline-none focus:border-jade-400"
+                        />
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-gray-400 pt-1">
+                      <input
+                        type="checkbox"
+                        checked={onlyWithAttachment}
+                        onChange={(e) => setOnlyWithAttachment(e.target.checked)}
+                        className="accent-jade-500"
+                      />
+                      Só dúvidas com anexo 📎
+                    </label>
+
+                    {(resolvedByFilter !== "all" ||
+                      satisfactionFilter !== "all" ||
+                      dateFrom ||
+                      dateTo ||
+                      onlyWithAttachment) && (
+                      <button
+                        onClick={() => {
+                          setResolvedByFilter("all");
+                          setSatisfactionFilter("all");
+                          setDateFrom("");
+                          setDateTo("");
+                          setOnlyWithAttachment(false);
+                        }}
+                        className="text-[11px] text-jade-400 hover:text-jade-300 pt-1"
+                      >
+                        Limpar filtros avançados
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -669,6 +877,17 @@ export function DashboardClient({
                       {q.resolvedBy === "ai" && (
                         <span className="inline-block mt-1 ml-1 text-[10px] px-1.5 py-0.5 rounded bg-sky-900/40 text-sky-300">
                           🤖 IA
+                        </span>
+                      )}
+                      {q.satisfaction === "positive" && (
+                        <span className="inline-block mt-1 ml-1 text-[10px]">👍</span>
+                      )}
+                      {q.satisfaction === "negative" && (
+                        <span className="inline-block mt-1 ml-1 text-[10px]">👎</span>
+                      )}
+                      {q.attachments.length > 0 && (
+                        <span className="inline-block mt-1 ml-1 text-[10px] text-gray-500">
+                          📎 {q.attachments.length}
                         </span>
                       )}
                     </div>

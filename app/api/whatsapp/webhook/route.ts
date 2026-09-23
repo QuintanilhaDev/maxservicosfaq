@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendFreeformWhatsApp, sendSubjectMenu, normalizeBrazilPhone } from "@/lib/whatsapp";
 import { matchSubjectFromReply, getSubjectLabel } from "@/lib/subjects";
 import { getGreetingBahia } from "@/lib/greeting";
-import { tryAutoAnswer, getOrCreateAiUserId } from "@/lib/ai-matcher";
+import { tryAutoAnswer, getOrCreateAiUserId, markAiAnswerAsRejected } from "@/lib/ai-matcher";
 import { broadcastDashboardEvent } from "@/lib/realtime";
 
 /**
@@ -16,11 +16,12 @@ import { broadcastDashboardEvent } from "@/lib/realtime";
  * Fluxo (máquina de estados em Conversation.stage):
  *   AWAITING_NAME     -> aguardando o nome completo do colaborador
  *   AWAITING_SUBJECT  -> aguardando a escolha do assunto (lista interativa)
- *   AWAITING_MESSAGE  -> aguardando a descrição da dúvida
+ *   AWAITING_MESSAGE  -> aguardando a descrição da dúvida (aceita anexo)
  *   AWAITING_ADMIN    -> dúvida registrada, aguardando resposta humana
- *   AWAITING_FEEDBACK -> a IA acabou de responder; se o colaborador escrever
- *                        de novo, entendemos que não resolveu e encaminhamos
- *                        para um humano
+ *   AWAITING_RATING   -> aguardando "isso resolveu? 1-Sim / 2-Não", depois de
+ *                        QUALQUER resposta (humana ou da IA). Se "não" numa
+ *                        dúvida respondida pela IA, isso alimenta o
+ *                        aprendizado por rejeição (markAiAnswerAsRejected).
  *   IDLE              -> ciclo anterior concluído, pronto para nova dúvida
  */
 
@@ -31,6 +32,11 @@ const XML_EMPTY_RESPONSE = new NextResponse("<Response></Response>", {
 
 function shouldValidateSignature() {
   return process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
+}
+
+interface IncomingMedia {
+  url: string;
+  contentType: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,10 +56,15 @@ export async function POST(req: NextRequest) {
   const from = params.From || ""; // "whatsapp:+5571999999999"
   const body = (params.Body || "").trim();
   const messageSid = params.MessageSid || null;
-  // Quando o colaborador toca em um item da lista interativa, a Twilio manda
-  // o "id" que definimos (a subject.key) em ButtonPayload — bem mais
-  // confiável do que tentar interpretar o texto do botão.
   const buttonPayload = params.ButtonPayload || null;
+
+  const numMedia = parseInt(params.NumMedia || "0", 10) || 0;
+  const media: IncomingMedia[] = [];
+  for (let i = 0; i < numMedia; i++) {
+    const url = params[`MediaUrl${i}`];
+    const contentType = params[`MediaContentType${i}`] || "application/octet-stream";
+    if (url) media.push({ url, contentType });
+  }
 
   if (!from) {
     return XML_EMPTY_RESPONSE;
@@ -65,7 +76,6 @@ export async function POST(req: NextRequest) {
     try {
       await prisma.processedMessage.create({ data: { sid: messageSid } });
     } catch {
-      // Já existe -> mensagem duplicada, não processa de novo.
       return XML_EMPTY_RESPONSE;
     }
   }
@@ -73,7 +83,7 @@ export async function POST(req: NextRequest) {
   const phone = normalizeBrazilPhone(from.replace("whatsapp:", ""));
 
   try {
-    await handleIncomingMessage(phone, body, buttonPayload);
+    await handleIncomingMessage(phone, body, buttonPayload, media);
   } catch (err) {
     console.error("[whatsapp/webhook] Erro ao processar mensagem:", err);
   }
@@ -95,10 +105,28 @@ async function sendMenu(phone: string, prefixText?: string) {
   }
 }
 
+/** Inicia um novo ciclo de dúvida — pulando a etapa de nome se já soubermos. */
+async function startNewCycle(phone: string, knownName: string | null) {
+  if (knownName) {
+    await prisma.conversation.update({
+      where: { phone },
+      data: { stage: "AWAITING_SUBJECT", pendingSubject: null, activeQuestionId: null },
+    });
+    await sendMenu(phone, `${getGreetingBahia()} de novo, ${knownName}!`);
+  } else {
+    await prisma.conversation.update({ where: { phone }, data: { stage: "AWAITING_NAME" } });
+    await reply(
+      phone,
+      `${getGreetingBahia()}! Aqui é a *MAX Serviços* 👋\n\nPara começar, me diga seu *nome completo*, por favor.`
+    );
+  }
+}
+
 async function handleIncomingMessage(
   phone: string,
   body: string,
-  buttonPayload: string | null
+  buttonPayload: string | null,
+  media: IncomingMedia[]
 ) {
   const conversation = await prisma.conversation.findUnique({ where: { phone } });
 
@@ -141,36 +169,48 @@ async function handleIncomingMessage(
       });
       await reply(
         phone,
-        `Entendido! Pode descrever sua dúvida sobre *${subject.label}* com o máximo de detalhes possível?`
+        `Entendido! Pode descrever sua dúvida sobre *${subject.label}* com o máximo de detalhes possível? Se quiser, pode mandar uma foto ou documento junto.`
       );
       return;
     }
 
     case "AWAITING_MESSAGE": {
-      if (body.length < 5) {
+      // Aceita a mensagem se tiver texto suficiente OU pelo menos um anexo
+      // (colaborador pode mandar só uma foto, sem legenda).
+      if (body.length < 5 && media.length === 0) {
         await reply(phone, "Pode descrever com um pouco mais de detalhe, por favor?");
         return;
       }
 
       const name = conversation.name || "Colaborador(a)";
       const subjectKey = conversation.pendingSubject || "outros_assuntos";
+      const messageText = body.length > 0 ? body : "(anexo enviado, sem descrição em texto)";
 
       const question = await prisma.question.create({
-        data: { name, phone, subject: subjectKey, message: body },
+        data: { name, phone, subject: subjectKey, message: messageText },
       });
+
+      if (media.length > 0) {
+        await prisma.attachment.createMany({
+          data: media.map((m) => ({
+            questionId: question.id,
+            url: m.url,
+            contentType: m.contentType,
+          })),
+        });
+      }
 
       await broadcastDashboardEvent({ type: "question_created", subject: subjectKey });
 
       // Tenta responder automaticamente com base em dúvidas parecidas já
-      // respondidas por humanos (veja lib/ai-matcher.ts).
-      const autoAnswer = await tryAutoAnswer({ subjectKey, message: body });
+      // respondidas por humanos (veja lib/ai-matcher.ts). Anexos não entram
+      // na comparação — só o texto da dúvida.
+      const autoAnswer = await tryAutoAnswer({ subjectKey, message: messageText });
 
       if (autoAnswer.answered && autoAnswer.text) {
         const aiUserId = await getOrCreateAiUserId();
-        const fullText = `${autoAnswer.text}\n\n_(resposta automática baseada em dúvidas parecidas já respondidas — se isso não resolveu, é só escrever de novo que um atendente humano assume)_`;
+        const fullText = `${autoAnswer.text}\n\n_(resposta automática baseada em dúvidas parecidas já respondidas)_\n\nIsso resolveu sua dúvida? Responda *1* para Sim ou *2* para Não.`;
 
-        // Tenta enviar ANTES de gravar o resultado — nunca registrar
-        // "enviado" sem ter certeza de que foi enviado de verdade.
         const sendResult = await sendFreeformWhatsApp({ toPhone: phone, body: fullText });
 
         await prisma.reply.create({
@@ -180,6 +220,7 @@ async function handleIncomingMessage(
             adminUserId: aiUserId,
             isAiGenerated: true,
             matchedScore: autoAnswer.score,
+            sourceReplyId: autoAnswer.matchedReplyId,
             sentToWhatsApp: sendResult.success,
             whatsappError: sendResult.success ? null : sendResult.error,
           },
@@ -193,19 +234,18 @@ async function handleIncomingMessage(
 
           await prisma.conversation.update({
             where: { phone },
-            data: { stage: "AWAITING_FEEDBACK", activeQuestionId: question.id },
+            data: { stage: "AWAITING_RATING", activeQuestionId: question.id },
           });
 
           await broadcastDashboardEvent({ type: "question_answered_ai", subject: subjectKey });
           return;
         }
 
-        // Envio da IA falhou: a dúvida segue pendente e cai no fluxo normal
-        // de encaminhamento para um humano, logo abaixo.
         console.error(
           `[whatsapp/webhook] Falha ao enviar resposta automática da IA para ${phone}:`,
           sendResult.error
         );
+        // cai para o encaminhamento normal ao humano, abaixo
       }
 
       await prisma.conversation.update({
@@ -222,23 +262,60 @@ async function handleIncomingMessage(
       return;
     }
 
-    case "AWAITING_FEEDBACK": {
-      // Colaborador escreveu de novo depois de uma resposta automática da
-      // IA — entendemos que não resolveu e encaminhamos para um humano.
-      if (conversation.activeQuestionId) {
-        await prisma.question.update({
-          where: { id: conversation.activeQuestionId },
-          data: { status: "pending", resolvedBy: null, lastInboundAt: new Date() },
-        });
-      }
-      await prisma.conversation.update({
-        where: { phone },
-        data: { stage: "AWAITING_ADMIN" },
-      });
-      await reply(
-        phone,
-        "Entendido, vou encaminhar sua dúvida para um atendente humano cuidar pessoalmente. Obrigado pela paciência! 🙏"
+    case "AWAITING_RATING": {
+      const text = body.trim().toLowerCase();
+      const positive = ["1", "sim", "s", "👍", "resolveu", "ajudou"].some(
+        (v) => text === v || text.includes(v)
       );
+      const negative = ["2", "não", "nao", "n", "👎", "não resolveu"].some(
+        (v) => text === v || text.includes(v)
+      );
+
+      const questionId = conversation.activeQuestionId;
+
+      if (positive && questionId) {
+        await prisma.question.update({ where: { id: questionId }, data: { satisfaction: "positive" } });
+        await prisma.conversation.update({
+          where: { phone },
+          data: { stage: "IDLE", activeQuestionId: null },
+        });
+        await reply(phone, "Que bom! Fico feliz em ajudar. 😊");
+        return;
+      }
+
+      if (negative && questionId) {
+        const question = await prisma.question.findUnique({ where: { id: questionId } });
+
+        // Se essa dúvida tinha sido respondida pela IA, isso é justamente o
+        // sinal de rejeição que ensina a IA a não reutilizar aquela resposta.
+        if (question?.resolvedBy === "ai") {
+          await markAiAnswerAsRejected(questionId);
+        }
+
+        await prisma.question.update({
+          where: { id: questionId },
+          data: { satisfaction: "negative", status: "pending", resolvedBy: null },
+        });
+        await prisma.conversation.update({
+          where: { phone },
+          data: { stage: "AWAITING_ADMIN" },
+        });
+        await broadcastDashboardEvent({
+          type: "question_reopened",
+          subject: question?.subject || "outros_assuntos",
+        });
+        await reply(
+          phone,
+          "Entendido, vou encaminhar sua dúvida para um atendente humano cuidar pessoalmente. Obrigado pela paciência! 🙏"
+        );
+        return;
+      }
+
+      // Resposta não reconhecida como avaliação — provavelmente o
+      // colaborador já está falando de outra coisa. Em vez de insistir
+      // "responda 1 ou 2" (o que travaria a conversa), tratamos como o
+      // início de um novo ciclo normalmente.
+      await startNewCycle(phone, conversation.name);
       return;
     }
 
@@ -260,19 +337,7 @@ async function handleIncomingMessage(
 
     case "IDLE":
     default: {
-      if (conversation.name) {
-        await prisma.conversation.update({
-          where: { phone },
-          data: { stage: "AWAITING_SUBJECT", pendingSubject: null, activeQuestionId: null },
-        });
-        await sendMenu(phone, `${getGreetingBahia()} de novo, ${conversation.name}!`);
-      } else {
-        await prisma.conversation.update({ where: { phone }, data: { stage: "AWAITING_NAME" } });
-        await reply(
-          phone,
-          `${getGreetingBahia()}! Aqui é a *MAX Serviços* 👋\n\nPara começar, me diga seu *nome completo*, por favor.`
-        );
-      }
+      await startNewCycle(phone, conversation.name);
       return;
     }
   }

@@ -19,6 +19,10 @@ export async function GET() {
           orderBy: { createdAt: "asc" },
           include: { adminUser: { select: { username: true } } },
         },
+        attachments: {
+          orderBy: { createdAt: "asc" },
+          select: { id: true, contentType: true, createdAt: true },
+        },
       },
     });
 

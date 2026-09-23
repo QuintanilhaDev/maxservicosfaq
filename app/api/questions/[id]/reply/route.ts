@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionFromCookies } from "@/lib/auth";
-import { sendWhatsAppReply } from "@/lib/whatsapp";
+import { sendWhatsAppReply, sendFreeformWhatsApp } from "@/lib/whatsapp";
 import { broadcastDashboardEvent } from "@/lib/realtime";
 
 const replySchema = z.object({
@@ -64,13 +64,19 @@ export async function POST(
         : {}, // envio falhou: mantém como pendente, para não sumir da fila
     });
 
-    // Libera a conversa desse telefone para um novo ciclo (o colaborador
-    // pode mandar uma nova dúvida a qualquer momento a partir de agora).
+    // Depois de uma resposta entregue com sucesso, manda o pedido de
+    // avaliação rápida e deixa a conversa aguardando essa resposta —
+    // se o colaborador avaliar negativamente, a dúvida volta pra fila.
     if (whatsappResult.success) {
+      await sendFreeformWhatsApp({
+        toPhone: question.phone,
+        body: "Isso resolveu sua dúvida? Responda *1* para Sim ou *2* para Não.",
+      });
+
       await prisma.conversation
         .update({
           where: { phone: question.phone },
-          data: { stage: "IDLE", activeQuestionId: null },
+          data: { stage: "AWAITING_RATING", activeQuestionId: question.id },
         })
         .catch(() => null); // não quebra a resposta se a conversa não existir mais
 

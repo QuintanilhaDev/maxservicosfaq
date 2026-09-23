@@ -24,7 +24,8 @@ export const DASHBOARD_CHANNEL = "dashboard-updates";
 export type DashboardEvent =
   | { type: "question_created"; subject: string }
   | { type: "question_answered_ai"; subject: string }
-  | { type: "question_answered_admin"; subject: string };
+  | { type: "question_answered_admin"; subject: string }
+  | { type: "question_reopened"; subject: string };
 
 let cachedClient: SupabaseClient | null | undefined;
 

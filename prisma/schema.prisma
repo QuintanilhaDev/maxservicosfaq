@@ -19,7 +19,7 @@ model AdminUser {
 
 // Guarda o "estado" da conversa de bot de cada número de telefone.
 // AWAITING_NAME | AWAITING_SUBJECT | AWAITING_MESSAGE | AWAITING_ADMIN |
-// AWAITING_FEEDBACK (IA acabou de responder, aguardando confirmação) | IDLE
+// AWAITING_RATING (aguardando "isso resolveu?") | IDLE
 model Conversation {
   id               String   @id @default(cuid())
   phone            String   @unique
@@ -38,14 +38,17 @@ model Question {
   subject       String
   message       String   @db.Text
   status        String   @default("pending") // pending | answered
-  resolvedBy    String?  // "admin" | "ai" — preenchido quando status = answered
+  resolvedBy    String?  // "admin" | "ai"
+  satisfaction  String?  // "positive" | "negative" | null (não avaliada / sem resposta)
   createdAt     DateTime @default(now())
   lastInboundAt DateTime @default(now())
   replies       Reply[]
+  attachments   Attachment[]
 
   @@index([status])
   @@index([subject])
   @@index([createdAt])
+  @@index([satisfaction])
 }
 
 model Reply {
@@ -57,9 +60,31 @@ model Reply {
   adminUserId    String
   isAiGenerated  Boolean   @default(false)
   matchedScore   Float?    // similaridade (0 a 1) que gerou a resposta automática, se for o caso
+
+  // Quando a IA reaproveita uma resposta humana, aponta pra ela aqui. Se o
+  // colaborador avaliar como "não ajudou", marcamos essa resposta original
+  // como excludedFromAi — a IA para de reutilizá-la, mas ela continua
+  // visível no histórico normalmente (nada é apagado).
+  sourceReplyId  String?
+  sourceReply    Reply?    @relation("ReplySource", fields: [sourceReplyId], references: [id], onDelete: SetNull)
+  reusedBy       Reply[]   @relation("ReplySource")
+  excludedFromAi Boolean   @default(false)
+
   sentToWhatsApp Boolean   @default(false)
   whatsappError  String?
   createdAt      DateTime  @default(now())
+
+  @@index([questionId])
+}
+
+// Anexos (fotos, PDFs, áudios) que o colaborador manda junto da dúvida.
+model Attachment {
+  id          String   @id @default(cuid())
+  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId  String
+  url         String   @db.Text // URL da Twilio (privada — servida via proxy autenticado)
+  contentType String
+  createdAt   DateTime @default(now())
 
   @@index([questionId])
 }

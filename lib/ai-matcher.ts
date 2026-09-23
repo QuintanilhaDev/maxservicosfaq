@@ -33,12 +33,34 @@ export async function getOrCreateAiUserId(): Promise<string> {
   return created.id;
 }
 
+/**
+ * Chamado quando o colaborador avalia como "não ajudou" uma dúvida que foi
+ * respondida pela IA. Encontra a resposta HUMANA original que a IA
+ * reaproveitou e marca ela como "excludedFromAi" — a partir daí, a IA não
+ * volta a sugerir esse mesmo texto para dúvidas parecidas. A resposta em si
+ * continua no histórico normalmente, só para de ser usada como modelo.
+ */
+export async function markAiAnswerAsRejected(questionId: string): Promise<void> {
+  const aiReply = await prisma.reply.findFirst({
+    where: { questionId, isAiGenerated: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (aiReply?.sourceReplyId) {
+    await prisma.reply.update({
+      where: { id: aiReply.sourceReplyId },
+      data: { excludedFromAi: true },
+    });
+  }
+}
+
 const MAX_EXAMPLES_CONSIDERED = 300; // limite de segurança de performance
 
 export interface AutoAnswerResult {
   answered: boolean;
   text?: string;
   matchedQuestionId?: string;
+  matchedReplyId?: string;
   score?: number;
 }
 
@@ -50,7 +72,9 @@ export interface AutoAnswerResult {
  * quantidade mínima de exemplos humanos para aquele assunto, e (4) a dúvida
  * mais parecida encontrada tiver similaridade acima do limite configurado.
  * Quando responde, reutiliza o texto EXATO de uma resposta humana já dada —
- * nunca gera um texto novo.
+ * nunca gera um texto novo. Respostas marcadas como "excludedFromAi" (porque
+ * já foram usadas antes e o colaborador avaliou que não ajudou) ficam de
+ * fora da busca — é assim que a IA "aprende com a rejeição".
  */
 export async function tryAutoAnswer(params: {
   subjectKey: string;
@@ -68,17 +92,17 @@ export async function tryAutoAnswer(params: {
   }
 
   // Busca dúvidas anteriores do mesmo assunto que já têm uma resposta
-  // HUMANA (isAiGenerated: false), com a respectiva resposta.
+  // HUMANA (isAiGenerated: false) ainda não rejeitada (excludedFromAi: false).
   const pastQuestions = await prisma.question.findMany({
     where: {
       subject: params.subjectKey,
-      replies: { some: { isAiGenerated: false } },
+      replies: { some: { isAiGenerated: false, excludedFromAi: false } },
     },
     orderBy: { createdAt: "desc" },
     take: MAX_EXAMPLES_CONSIDERED,
     include: {
       replies: {
-        where: { isAiGenerated: false },
+        where: { isAiGenerated: false, excludedFromAi: false },
         orderBy: { createdAt: "asc" },
         take: 1,
       },
@@ -108,6 +132,7 @@ export async function tryAutoAnswer(params: {
     answered: true,
     text: matchedReply.text,
     matchedQuestionId: matchedQuestion.id,
+    matchedReplyId: matchedReply.id,
     score: match.score,
   };
 }

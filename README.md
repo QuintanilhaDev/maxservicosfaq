@@ -102,6 +102,16 @@ Em `/admin/metrics`:
 
 ---
 
+## 4.2 Avaliação rápida, aprendizado por rejeição, anexos e busca avançada
+
+**Avaliação rápida:** depois de QUALQUER resposta (de admin ou da IA), o bot pergunta automaticamente "Isso resolveu sua dúvida? Responda 1 para Sim ou 2 para Não". A resposta fica salva em `Question.satisfaction` e aparece como 👍/👎 no painel.
+
+**Aprender com a rejeição:** se o colaborador avalia como "Não" uma dúvida que a IA respondeu sozinha, o sistema marca aquela resposta humana original (`Reply.excludedFromAi`) como "não reutilizável" — a IA para de sugeri-la para dúvidas parecidas no futuro. Nada é apagado do histórico, só para de ser usado como modelo. Se avaliar "Não" numa resposta humana, a dúvida simplesmente volta para a fila de um admin.
+
+**Anexos:** o colaborador pode mandar foto/PDF/áudio junto da dúvida (inclusive sem digitar nada, só o anexo). As mídias da Twilio são privadas por padrão — o painel busca elas através de uma rota própria (`/api/attachments/:id`), autenticada por sessão de admin, sem nunca expor o link direto da Twilio.
+
+**Busca avançada:** campo de busca por nome/telefone/palavra-chave no dashboard, mais um painel "Mais filtros" com: respondida por (humano/IA), avaliação do colaborador, período (de/até) e "só com anexo".
+
 ## 5. Pré-requisitos
 
 - Node.js 18+.
@@ -198,6 +208,7 @@ app/
     metrics/route.ts                  → KPIs e série temporal por período
     admin/ai-settings/route.ts        → interruptores da IA (master)
     admin/users/route.ts, auth/*
+    attachments/[id]/route.ts         → proxy autenticado para mídias da Twilio
 lib/
   prisma.ts, auth.ts, whatsapp.ts
   subjects.ts                         → lista de assuntos (labels curtos p/ WhatsApp + permissão de IA)
